@@ -2,13 +2,13 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>本格 SVG ベクターエディター (Scratch風)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>タッチ対応 SVG ベクターエディター</title>
     <style>
-        body { margin: 0; font-family: sans-serif; display: flex; height: 100vh; background-color: #1e1e1e; color: #fff; user-select: none; }
-        #sidebar { width: 320px; background-color: #2d2d2d; padding: 15px; box-sizing: border-box; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; border-right: 2px solid #3f3f3f; }
-        #canvas-container { flex: 1; display: flex; justify-content: center; align-items: center; background-color: #444; position: relative; overflow: hidden; }
-        svg { background-color: white; box-shadow: 0 4px 15px rgba(0,0,0,0.5); cursor: crosshair; }
+        body { margin: 0; font-family: sans-serif; display: flex; height: 100vh; background-color: #1e1e1e; color: #fff; user-select: none; -webkit-user-select: none; }
+        #sidebar { width: 320px; background-color: #2d2d2d; padding: 15px; box-sizing: border-box; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; border-right: 2px solid #3f3f3f; flex-shrink: 0; }
+        #canvas-container { flex: 1; display: flex; justify-content: center; align-items: center; background-color: #444; position: relative; overflow: hidden; touch-action: none; }
+        svg { background-color: white; box-shadow: 0 4px 15px rgba(0,0,0,0.5); cursor: crosshair; touch-action: none; }
         .tool-group { border: 1px solid #444; padding: 10px; border-radius: 5px; background: #252525; }
         h3 { margin-top: 0; font-size: 13px; color: #00d2ff; letter-spacing: 0.5px; }
         label { display: block; margin: 8px 0 4px; font-size: 11px; color: #aaa; }
@@ -20,10 +20,11 @@
         .gradient-stop { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; }
         .gradient-stop input[type="color"] { border: none; width: 30px; height: 25px; background: none; cursor: pointer; }
         /* コントロール用スタイリング */
-        .anchor-point { fill: #00d2ff; stroke: #fff; stroke-width: 1.5; cursor: move; }
+        .anchor-point { fill: #00d2ff; stroke: #fff; stroke-width: 1.5; }
         .anchor-point.selected { fill: #ff4081; stroke: #fff; stroke-width: 2; }
-        .handle-point { fill: #fff; stroke: #00d2ff; stroke-width: 1.5; cursor: move; }
+        .handle-point { fill: #fff; stroke: #00d2ff; stroke-width: 1.5; }
         .handle-line { stroke: #00d2ff; stroke-width: 1; stroke-dasharray: 2; }
+        #pen-guide-line { stroke: #ff4081; stroke-width: 1.5; stroke-dasharray: 4; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -34,13 +35,19 @@
     <div class="tool-group">
         <h3>1. ツール選択</h3>
         <div class="btn-grid">
-            <button id="tool-select" class="active" onclick="setTool('select')">選択・変形 (矢印)</button>
-            <button id="tool-pen" onclick="setTool('pen')">ペン (パス描画)</button>
+            <button id="tool-select" class="active" onclick="setTool('select')">選択・変形</button>
+            <button id="tool-pen" onclick="setTool('pen')">ペン (パス画面タップ)</button>
             <button id="tool-rect" onclick="setTool('rect')">四角形</button>
             <button id="tool-circle" onclick="setTool('circle')">円・楕円</button>
             <button id="tool-polygon" onclick="setTool('polygon')">正X角形</button>
             <button id="tool-eraser" onclick="setTool('eraser')">消しゴム</button>
         </div>
+    </div>
+
+    <div class="tool-group" id="pen-controls" style="display:none;">
+        <h3>線の描画を終わる</h3>
+        <button onclick="finishPenPath(true)" style="background:#00d2ff; color:#000; width:100%; margin-bottom:5px;">線を閉じて図形にする</button>
+        <button onclick="finishPenPath(false)" style="background:#666; color:#fff; width:100%;">閉じずにただの線にする</button>
     </div>
 
     <div class="tool-group" id="poly-settings" style="display:none;">
@@ -78,11 +85,11 @@
             <div id="gradient-stops">
                 <div class="gradient-stop">
                     <input type="color" value="#ff4081" onchange="updateGradientDefs(); updateSelectedElementStyle();">
-                    <input type="number" value="0" min="0" max="100" oninput="updateGradientDefs(); updateSelectedElementStyle();">
+                    <input type="number" value="0" min="0" max="100" oninput="updateGradientDefs(); updateSelectedElementStyle();">%
                 </div>
                 <div class="gradient-stop">
                     <input type="color" value="#00d2ff" onchange="updateGradientDefs(); updateSelectedElementStyle();">
-                    <input type="number" value="100" min="0" max="100" oninput="updateGradientDefs(); updateSelectedElementStyle();">
+                    <input type="number" value="100" min="0" max="100" oninput="updateGradientDefs(); updateSelectedElementStyle();">%
                 </div>
             </div>
             <button type="button" style="width:100%; margin-top:5px; background:#555;" onclick="addGradientStop()">🎨 色を追加</button>
@@ -90,12 +97,12 @@
     </div>
 
     <div class="tool-group" id="node-mode-wrap" style="display:none;">
-        <h3>4. 選択中のポイントの角・カーブ切り替え</h3>
+        <h3>4. ポイントの角・なめらか切り替え</h3>
         <div class="btn-grid">
             <button id="btn-node-sharp" onclick="setSelectedNodeMode('sharp')">角にする</button>
             <button id="btn-node-smooth" onclick="setSelectedNodeMode('smooth')">なめらか</button>
         </div>
-        <p style="font-size:10px; color:#888; margin: 5px 0 0 0;">※線上のダブルクリックでポイント追加</p>
+        <button onclick="insertPointInSelected()" style="width:100%; margin-top:8px; background:#444; font-size:11px;">選択中の後ろにポイント追加</button>
     </div>
 
     <button id="export-btn" style="background:#00c853; color:#fff; margin-top:auto;" onclick="exportSVG()">GitHub用SVGを出力</button>
@@ -103,10 +110,10 @@
 
 <div id="canvas-container">
     <svg id="svg-canvas" width="600" height="500" xmlns="http://www.w3.org/2000/svg">
-        <defs id="svg-defs">
-            </defs>
+        <defs id="svg-defs"></defs>
         <g id="bg-grid"></g>
         <g id="draw-layer"></g>
+        <line id="pen-guide-line" x1="0" y1="0" x2="0" y2="0" display="none" />
         <g id="control-layer"></g>
     </svg>
 </div>
@@ -116,20 +123,19 @@
     const drawLayer = document.getElementById('draw-layer');
     const controlLayer = document.getElementById('control-layer');
     const defs = document.getElementById('svg-defs');
+    const penGuideLine = document.getElementById('pen-guide-line');
 
     let currentTool = 'select';
     let isDrawing = false;
     let startX = 0, startY = 0;
 
-    let selectedElement = null;   // 現在選択中のSVG要素
-    let selectedPointIdx = null;  // パス変形中で現在選択中の頂点インデックス
+    let selectedElement = null;
+    let selectedPointIdx = null;
     
-    // 全てのパスの「生の頂点・ベジェデータ」を管理するMap (Element -> Array of Points)
-    // point: { x, y, h1x, h1y, h2x, h2y, type: 'sharp'|'smooth' }
     const pathDataMap = new Map();
     let currentPenPoints = [];
 
-    // 背景チェッカーの生成
+    // 背景チェッカー
     function createBgGrid() {
         const bg = document.getElementById('bg-grid');
         for(let x=0; x<600; x+=20){
@@ -144,12 +150,24 @@
     }
     createBgGrid();
 
+    // マウス・タッチ両方の座標を正しく取得する関数
+    function getEventXY(e) {
+        const rect = svg.getBoundingClientRect();
+        if (e.touches && e.touches.length > 0) {
+            return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+        } else if (e.changedTouches && e.changedTouches.length > 0) {
+            return { x: e.changedTouches[0].clientX - rect.left, y: e.changedTouches[0].clientY - rect.top };
+        }
+        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    }
+
     function setTool(tool) {
         currentTool = tool;
         document.querySelectorAll('#sidebar button').forEach(b => b.classList.remove('active'));
         if(document.getElementById(`tool-${tool}`)) document.getElementById(`tool-${tool}`).classList.add('active');
         
         document.getElementById('poly-settings').style.display = (tool === 'polygon') ? 'block' : 'none';
+        document.getElementById('pen-controls').style.display = (tool === 'pen') ? 'block' : 'none';
         
         if (tool !== 'select') {
             selectedElement = null;
@@ -159,6 +177,7 @@
         }
         if (tool !== 'pen') {
             currentPenPoints = [];
+            penGuideLine.setAttribute('display', 'none');
         }
     }
 
@@ -183,7 +202,6 @@
         updateSelectedElementStyle();
     }
 
-    // 動的グラデーションタグの更新
     function updateGradientDefs() {
         defs.innerHTML = '';
         const type = document.getElementById('fill-type').value;
@@ -218,7 +236,6 @@
         return 'url(#dynamic-grad)';
     }
 
-    // 共通スタイル適用
     function applyStyles(el) {
         el.setAttribute('stroke', document.getElementById('stroke-color').value);
         el.setAttribute('stroke-width', document.getElementById('stroke-width').value);
@@ -233,20 +250,17 @@
         }
     }
 
-    // --- マウス描画ロジック ---
-    svg.addEventListener('mousedown', (e) => {
-        const rect = svg.getBoundingClientRect();
-        startX = e.clientX - rect.left;
-        startY = e.clientY - rect.top;
-
-        // 左クリック以外、またはコントロールハンドル上の場合はスルー
-        if(e.button !== 0 || e.target.classList.contains('anchor-point') || e.target.classList.contains('handle-point')) return;
+    // --- メイン描画イベント(タッチ・マウス完全統合) ---
+    function onStart(e) {
+        const pos = getEventXY(e);
+        startX = pos.x;
+        startY = pos.y;
 
         if (currentTool === 'select') {
             if (e.target !== svg && e.target.parentNode === drawLayer) {
                 selectedElement = e.target;
                 setupTransformUI(selectedElement);
-            } else {
+            } else if (e.target === svg) {
                 selectedElement = null;
                 selectedPointIdx = null;
                 controlLayer.innerHTML = '';
@@ -266,74 +280,74 @@
 
         isDrawing = true;
 
-        if (currentTool === 'rect') {
+        if (currentTool === 'rect' || currentTool === 'circle' || currentTool === 'polygon') {
             selectedElement = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             applyStyles(selectedElement);
             drawLayer.appendChild(selectedElement);
         } 
-        else if (currentTool === 'circle') {
-            selectedElement = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            applyStyles(selectedElement);
-            drawLayer.appendChild(selectedElement);
-        }
-        else if (currentTool === 'polygon') {
-            selectedElement = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            applyStyles(selectedElement);
-            drawLayer.appendChild(selectedElement);
-        }
         else if (currentTool === 'pen') {
-            // 初回ポイント
             if(currentPenPoints.length === 0) {
                 selectedElement = document.createElementNS('http://www.w3.org/2000/svg', 'path');
                 applyStyles(selectedElement);
-                selectedElement.setAttribute('fill', 'none'); // 描き途中は見やすく透明に
+                selectedElement.setAttribute('fill', 'none'); 
                 drawLayer.appendChild(selectedElement);
             }
             
-            const pt = { x: startX, y: startY, h1x: startX - 20, h1y: startY, h2x: startX + 20, h2y: startY, type: 'sharp' };
+            // タップした場所に即座に点を追加
+            const pt = { x: startX, y: startY, h1x: startX - 25, h1y: startY, h2x: startX + 25, h2y: startY, type: 'sharp' };
             currentPenPoints.push(pt);
             pathDataMap.set(selectedElement, [...currentPenPoints]);
             renderPathFromData(selectedElement);
             setupTransformUI(selectedElement);
-        }
-    });
 
-    svg.addEventListener('mousemove', (e) => {
+            // ガイド線の始点を更新
+            penGuideLine.setAttribute('x1', startX);
+            penGuideLine.setAttribute('y1', startY);
+            penGuideLine.setAttribute('x2', startX);
+            penGuideLine.setAttribute('y2', startY);
+            penGuideLine.setAttribute('display', 'inline');
+        }
+    }
+
+    function onMove(e) {
+        const pos = getEventXY(e);
+        const mouseX = pos.x;
+        const mouseY = pos.y;
+
+        // ペンツールのときは、次にタップする場所へのガイド点線を描画
+        if (currentTool === 'pen' && currentPenPoints.length > 0) {
+            penGuideLine.setAttribute('x2', mouseX);
+            penGuideLine.setAttribute('y2', mouseY);
+        }
+
         if (!isDrawing || !selectedElement) return;
-        const rect = svg.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
 
         let pts = [];
 
         if (currentTool === 'rect') {
-            const x1 = startX, y1 = startY, x2 = mouseX, y2 = mouseY;
             pts = [
-                { x: x1, y: y1, type: 'sharp' },
-                { x: x2, y: y1, type: 'sharp' },
-                { x: x2, y: y2, type: 'sharp' },
-                { x: x1, y: y2, type: 'sharp' }
+                { x: startX, y: startY, type: 'sharp' },
+                { x: mouseX, y: startY, type: 'sharp' },
+                { x: mouseX, y: mouseY, type: 'sharp' },
+                { x: startX, y: mouseY, type: 'sharp' },
+                { x: startX, y: startY, type: 'sharp', isClose: true }
             ];
-            // 閉じられたパスにする
-            pts.push({ x: x1, y: y1, type: 'sharp', isClose: true });
             pathDataMap.set(selectedElement, pts);
             renderPathFromData(selectedElement);
         } 
         else if (currentTool === 'circle') {
-            // 4つのベジェアンカーで完全な楕円/円を再現
             const rx = Math.abs(mouseX - startX);
             const ry = Math.abs(mouseY - startY);
-            const kappa = 0.552284749831; // 円を再現する魔法の定数
-            const ox = rx * kappa;
-            const oy = ry * kappa;
+            const kappa = 0.5522847;
+            const ox = rx * kappa; const oy = ry * kappa;
 
             pts = [
                 { x: startX, y: startY - ry, h1x: startX - ox, h1y: startY - ry, h2x: startX + ox, h2y: startY - ry, type: 'smooth' },
                 { x: startX + rx, y: startY, h1x: startX + rx, h1y: startY - oy, h2x: startX + rx, h2y: startY + oy, type: 'smooth' },
                 { x: startX, y: startY + ry, h1x: startX + ox, h1y: startY + ry, h2x: startX - ox, h2y: startY + ry, type: 'smooth' },
-                { x: startX - rx, y: startY, h1x: startX - rx, h1y: startY + oy, h2x: startX - rx, h2y: startY - oy, type: 'smooth' }
+                { x: startX - rx, y: startY, h1x: startX - rx, h1y: startY + oy, h2x: startX - rx, h2y: startY - oy, type: 'smooth' },
+                { x: startX, y: startY - ry, type: 'smooth', isClose: true }
             ];
-            pts.push({ x: startX, y: startY - ry, type: 'smooth', isClose: true });
             pathDataMap.set(selectedElement, pts);
             renderPathFromData(selectedElement);
         }
@@ -342,43 +356,49 @@
             const radius = Math.sqrt(Math.pow(mouseX - startX, 2) + Math.pow(mouseY - startY, 2));
             for (let i = 0; i < sides; i++) {
                 const angle = (i * 2 * Math.PI / sides) - Math.PI / 2;
-                const px = startX + radius * Math.cos(angle);
-                const py = startY + radius * Math.sin(angle);
-                pts.push({ x: px, y: py, type: 'sharp' });
+                pts.push({ x: startX + radius * Math.cos(angle), y: startY + radius * Math.sin(angle), type: 'sharp' });
             }
             pts.push({ x: pts[0].x, y: pts[0].y, type: 'sharp', isClose: true });
             pathDataMap.set(selectedElement, pts);
             renderPathFromData(selectedElement);
         }
-    });
+    }
 
-    svg.addEventListener('mouseup', () => {
+    function onEnd() {
         if (currentTool !== 'pen') {
             isDrawing = false;
         }
-    });
+    }
 
-    // キーボードのEnter等でペンツールを終了・パスを閉じる
-    window.addEventListener('keydown', (e) => {
-        if ((e.key === 'Enter' || e.key === 'Escape') && currentTool === 'pen') {
-            isDrawing = false;
-            if (selectedElement && currentPenPoints.length > 1) {
-                // パスを閉じる処理
+    // イベント登録（マウス & タッチ両対応）
+    svg.addEventListener('mousedown', onStart);
+    svg.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onEnd);
+
+    svg.addEventListener('touchstart', (e) => { e.preventDefault(); onStart(e); }, { passive: false });
+    svg.addEventListener('touchmove', (e) => { e.preventDefault(); onMove(e); }, { passive: false });
+    window.addEventListener('touchend', onEnd);
+
+    // ペンツールの終了処理ボタン
+    function finishPenPath(shouldClose) {
+        isDrawing = false;
+        penGuideLine.setAttribute('display', 'none');
+        if (selectedElement && currentPenPoints.length > 0) {
+            if (shouldClose) {
                 currentPenPoints.push({ x: currentPenPoints[0].x, y: currentPenPoints[0].y, type: 'sharp', isClose: true });
-                pathDataMap.set(selectedElement, [...currentPenPoints]);
-                renderPathFromData(selectedElement);
-                applyStyles(selectedElement); // 最終的な色塗り適用
             }
-            currentPenPoints = [];
-            setupTransformUI(selectedElement);
+            pathDataMap.set(selectedElement, [...currentPenPoints]);
+            renderPathFromData(selectedElement);
+            applyStyles(selectedElement);
         }
-    });
+        setupTransformUI(selectedElement);
+        currentPenPoints = [];
+    }
 
-    // --- データ配列から実際のSVGの "d" 属性をレンダリングする超重要関数 ---
+    // データからSVGのパスストリング(d)を組み立て
     function renderPathFromData(el) {
         const points = pathDataMap.get(el);
         if (!points || points.length === 0) return;
-
         let d = `M ${points[0].x} ${points[0].y}`;
         
         for (let i = 1; i < points.length; i++) {
@@ -386,23 +406,14 @@
             const curr = points[i];
             
             if (curr.isClose) {
-                // パスを閉じる
                 if (prev.type === 'smooth' || points[0].type === 'smooth') {
-                    const p2x = prev.h2x !== undefined ? prev.h2x : prev.x;
-                    const p2y = prev.h2y !== undefined ? prev.h2y : prev.y;
-                    const c1x = points[0].h1x !== undefined ? points[0].h1x : points[0].x;
-                    const c1y = points[0].h1y !== undefined ? points[0].h1y : points[0].y;
-                    d += ` C ${p2x} ${p2y}, ${c1x} ${c1y}, ${points[0].x} ${points[0].y} Z`;
+                    d += ` C ${prev.h2x},${prev.h2y} ${points[0].h1x},${points[0].h1y} ${points[0].x},${points[0].y} Z`;
                 } else {
                     d += ` L ${points[0].x} ${points[0].y} Z`;
                 }
             } else {
                 if (prev.type === 'smooth' || curr.type === 'smooth') {
-                    const p2x = prev.h2x !== undefined ? prev.h2x : prev.x;
-                    const p2y = prev.h2y !== undefined ? prev.y;
-                    const c1x = curr.h1x !== undefined ? curr.h1x : curr.x;
-                    const c1y = curr.h1y !== undefined ? curr.y;
-                    d += ` C ${p2x} ${prev.h2y !== undefined ? prev.h2y : prev.y}, ${c1x} ${curr.h1y !== undefined ? curr.h1y : curr.y}, ${curr.x} ${curr.y}`;
+                    d += ` C ${prev.h2x},${prev.h2y} ${curr.h1x},${curr.h1y} ${curr.x} ${curr.y}`;
                 } else {
                     d += ` L ${curr.x} ${curr.y}`;
                 }
@@ -411,7 +422,7 @@
         el.setAttribute('d', d);
     }
 
-    // --- 【画像再現】アンカーポイントとベジェハンドルのUI制御 ---
+    // --- 変形用UI・タッチドラッグ完全対応版 ---
     function setupTransformUI(el) {
         controlLayer.innerHTML = '';
         const points = pathDataMap.get(el);
@@ -419,170 +430,140 @@
 
         document.getElementById('node-mode-wrap').style.display = 'block';
 
-        // ガイド線の描画（ダブルクリックによる途中ポイント追加の判定用）
-        const shadowPath = el.cloneNode(true);
-        shadowPath.setAttribute('stroke', 'transparent');
-        shadowPath.setAttribute('stroke-width', 10);
-        shadowPath.setAttribute('fill', 'none');
-        shadowPath.style.cursor = 'pointer';
-        // 【画像機能】線の上をダブルクリックでポイントを新規追加！
-        shadowPath.addEventListener('dblclick', (e) => {
-            const rect = svg.getBoundingClientRect();
-            const nx = e.clientX - rect.left;
-            const ny = e.clientY - rect.top;
-            
-            // 簡易的に一番近い線分の間に新しい頂点をねじ込む
-            if(points.length > 1) {
-                points.splice(points.length - 1, 0, { x: nx, y: ny, h1x: nx - 20, h1y: ny, h2x: nx + 20, h2y: ny, type: 'sharp' });
-                renderPathFromData(el);
-                setupTransformUI(el);
-            }
-        });
-        controlLayer.appendChild(shadowPath);
-
-        // 各アンカーポイントの描画
         points.forEach((pt, idx) => {
-            if (pt.isClose) return; // 閉じフラグ用ダミーは描画しない
+            if (pt.isClose) return;
 
-            // ハンドル線とコントロール丸（なめらかモード時のみ）
+            // なめらかモードのハンドル線と丸
             if (pt.type === 'smooth') {
-                createHandleLineAndCircle(el, points, pt, 'h1');
-                createHandleLineAndCircle(el, points, pt, 'h2');
+                createHandle(el, points, pt, 'h1');
+                createHandle(el, points, pt, 'h2');
             }
 
-            // 本体の青い四角/丸（アンカーポイント）
+            // アンカーポイント本体
             const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y);
-            c.setAttribute('r', 5);
+            c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y); c.setAttribute('r', 7); // タッチしやすいよう少し大きめに
             c.className.baseVal = 'anchor-point' + (selectedPointIdx === idx ? ' selected' : '');
 
-            // ドラッグで位置移動
-            c.addEventListener('mousedown', (e) => {
+            function dragStart(e) {
                 e.stopPropagation();
                 selectedPointIdx = idx;
-                setupTransformUI(el); // 選択状態のピンク色ハイライトにする
+                setupTransformUI(el);
 
-                const moveHandler = (ev) => {
-                    const r = svg.getBoundingClientRect();
-                    const nx = ev.clientX - r.left;
-                    const ny = ev.clientY - r.top;
-                    
-                    const dx = nx - pt.x;
-                    const dy = ny - pt.y;
-                    
-                    pt.x = nx; pt.y = ny;
+                function dragMove(ev) {
+                    const p = getEventXY(ev);
+                    const dx = p.x - pt.x; const dy = p.y - pt.y;
+                    pt.x = p.x; pt.y = p.y;
                     if(pt.h1x !== undefined) { pt.h1x += dx; pt.h1y += dy; }
                     if(pt.h2x !== undefined) { pt.h2x += dx; pt.h2y += dy; }
-                    
-                    // 閉じているパスの始点連動
                     if (idx === 0 && points[points.length - 1].isClose) {
-                        points[points.length - 1].x = nx;
-                        points[points.length - 1].y = ny;
+                        points[points.length - 1].x = p.x; points[points.length - 1].y = p.y;
                     }
-
                     renderPathFromData(el);
                     setupTransformUI(el);
-                };
-                const upHandler = () => {
-                    window.removeEventListener('mousemove', moveHandler);
-                    window.removeEventListener('mouseup', upHandler);
-                };
-                window.addEventListener('mousemove', moveHandler);
-                window.addEventListener('mouseup', upHandler);
-            });
-
+                }
+                function dragEnd() {
+                    window.removeEventListener('mousemove', dragMove);
+                    window.removeEventListener('mouseup', dragEnd);
+                    window.removeEventListener('touchmove', dragMove);
+                    window.removeEventListener('touchend', dragEnd);
+                }
+                window.addEventListener('mousemove', dragMove);
+                window.addEventListener('mouseup', dragEnd);
+                window.addEventListener('touchmove', dragMove, { passive: false });
+                window.addEventListener('touchend', dragEnd);
+            }
+            c.addEventListener('mousedown', dragStart);
+            c.addEventListener('touchstart', dragStart, { passive: false });
             controlLayer.appendChild(c);
         });
     }
 
-    // ベジェの羽（ハンドル）を生成するヘルパー
-    function createHandleLineAndCircle(el, points, pt, handleKey) {
-        if (pt[handleKey + 'x'] === undefined) {
-            pt[handleKey + 'x'] = pt.x + (handleKey === 'h1' ? -20 : 20);
-            pt[handleKey + 'y'] = pt.y;
+    function createHandle(el, points, pt, key) {
+        if (pt[key + 'x'] === undefined) {
+            pt[key + 'x'] = pt.x + (key === 'h1' ? -25 : 25);
+            pt[key + 'y'] = pt.y;
         }
+        const hl = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        hl.setAttribute('x1', pt.x); hl.setAttribute('y1', pt.y);
+        hl.setAttribute('x2', pt[key + 'x']); hl.setAttribute('y2', pt[key + 'y']);
+        hl.className.baseVal = 'handle-line';
+        controlLayer.appendChild(hl);
 
-        const hx = pt[handleKey + 'x'];
-        const hy = pt[handleKey + 'y'];
-
-        // ガイド点線
-        const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        l.setAttribute('x1', pt.x); l.setAttribute('y1', pt.y);
-        l.setAttribute('x2', hx); l.setAttribute('y2', hy);
-        l.className.baseVal = 'handle-line';
-        controlLayer.appendChild(l);
-
-        // ハンドル丸頭
         const hc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        hc.setAttribute('cx', hx); hc.setAttribute('cy', hy);
-        hc.setAttribute('r', 4); hc.className.baseVal = 'handle-point';
+        hc.setAttribute('cx', pt[key + 'x']); hc.setAttribute('cy', pt[key + 'y']); hc.setAttribute('r', 5);
+        hc.className.baseVal = 'handle-point';
 
-        hc.addEventListener('mousedown', (e) => {
+        function handleDragStart(e) {
             e.stopPropagation();
-            const moveHandler = (ev) => {
-                const r = svg.getBoundingClientRect();
-                const nx = ev.clientX - r.left;
-                const ny = ev.clientY - r.top;
-
-                pt[handleKey + 'x'] = nx;
-                pt[handleKey + 'y'] = ny;
-
-                // シーソー運動（対になるハンドルを逆方向に動かす）
-                const otherKey = handleKey === 'h1' ? 'h2' : 'h1';
-                if(pt[otherKey + 'x'] !== undefined) {
-                    const dx = pt.x - nx;
-                    const dy = pt.y - ny;
-                    pt[otherKey + 'x'] = pt.x + dx;
-                    pt[otherKey + 'y'] = pt.y + dy;
+            function handleDragMove(ev) {
+                const p = getEventXY(ev);
+                pt[key + 'x'] = p.x; pt[key + 'y'] = p.y;
+                const other = key === 'h1' ? 'h2' : 'h1';
+                if(pt[other + 'x'] !== undefined) {
+                    pt[other + 'x'] = pt.x + (pt.x - p.x);
+                    pt[other + 'y'] = pt.y + (pt.y - p.y);
                 }
-
-                renderPathFromData(el);
-                setupTransformUI(el);
-            };
-            const upHandler = () => {
-                window.removeEventListener('mousemove', moveHandler);
-                window.removeEventListener('mouseup', upHandler);
-            };
-            window.addEventListener('mousemove', moveHandler);
-            window.addEventListener('mouseup', upHandler);
-        });
-
+                renderPathFromData(el); setupTransformUI(el);
+            }
+            function handleDragEnd() {
+                window.removeEventListener('mousemove', handleDragMove);
+                window.removeEventListener('mouseup', handleDragEnd);
+                window.removeEventListener('touchmove', handleDragMove);
+                window.removeEventListener('touchend', handleDragEnd);
+            }
+            window.addEventListener('mousemove', handleDragMove);
+            window.addEventListener('mouseup', handleDragEnd);
+            window.addEventListener('touchmove', handleDragMove, { passive: false });
+            window.addEventListener('touchend', handleDragEnd);
+        }
+        hc.addEventListener('mousedown', handleDragStart);
+        hc.addEventListener('touchstart', handleDragStart, { passive: false });
         controlLayer.appendChild(hc);
     }
 
-    // 「角にする」「なめらか」のモード切り替え
     function setSelectedNodeMode(mode) {
         if (selectedElement && selectedPointIdx !== null) {
             const points = pathDataMap.get(selectedElement);
             if (points && points[selectedPointIdx]) {
                 points[selectedPointIdx].type = mode;
-                
                 if (mode === 'smooth') {
                     points[selectedPointIdx].h1x = points[selectedPointIdx].x - 25;
                     points[selectedPointIdx].h1y = points[selectedPointIdx].y;
                     points[selectedPointIdx].h2x = points[selectedPointIdx].x + 25;
                     points[selectedPointIdx].h2y = points[selectedPointIdx].y;
                 }
-                
                 renderPathFromData(selectedElement);
                 setupTransformUI(selectedElement);
             }
         }
     }
 
-    // --- GitHub用クリーンSVG出力 ---
+    // スマホでも確実に途中追加ができるよう、「選択中の後ろにポイント追加」ボタンを実装
+    function insertPointInSelected() {
+        if (selectedElement && selectedPointIdx !== null) {
+            const points = pathDataMap.get(selectedElement);
+            if(points && points.length > selectedPointIdx + 1) {
+                const curr = points[selectedPointIdx];
+                const next = points[selectedPointIdx + 1];
+                const nx = (curr.x + next.x) / 2;
+                const ny = (curr.y + next.y) / 2;
+                points.splice(selectedPointIdx + 1, 0, { x: nx, y: ny, h1x: nx - 25, h1y: ny, h2x: nx + 25, h2y: ny, type: 'sharp' });
+                renderPathFromData(selectedElement);
+                setupTransformUI(selectedElement);
+            }
+        }
+    }
+
     function exportSVG() {
         const clone = svg.cloneNode(true);
         clone.querySelector('#bg-grid').remove();
         clone.querySelector('#control-layer').remove();
-        
+        clone.querySelector('#pen-guide-line').remove();
         const svgCode = new XMLSerializer().serializeToString(clone);
         const blob = new Blob([svgCode], {type: "image/svg+xml;charset=utf-8"});
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = "vector-illustration.svg";
-        a.click();
+        a.href = url; a.download = "vector-art.svg"; a.click();
         URL.revokeObjectURL(url);
     }
 </script>

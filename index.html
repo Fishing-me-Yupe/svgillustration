@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>タブレット完全対応 SVG エディター Pro</title>
+    <title>タブレット完全対応 SVG エディター Ultimate</title>
     <style>
         body { margin: 0; font-family: sans-serif; display: flex; height: 100vh; background-color: #1e1e1e; color: #fff; user-select: none; -webkit-user-select: none; overflow: hidden; }
         #sidebar { width: 320px; background-color: #2d2d2d; padding: 15px; box-sizing: border-box; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; border-right: 2px solid #3f3f3f; flex-shrink: 0; }
@@ -18,19 +18,19 @@
         button:hover { background: #555; }
         button.active { background: #ff4081; color: #fff; }
         
-        /* グラデーション並び替え用のスタイリング */
+        /* グラデーション用 */
         #gradient-stops { display: flex; flex-direction: column; gap: 6px; }
         .gradient-stop { display: flex; align-items: center; gap: 8px; padding: 6px; background: #333; border: 1px solid #444; border-radius: 4px; }
         .gradient-stop.dragging { opacity: 0.5; background: #555; }
         .drag-handle { cursor: grab; padding: 4px 8px; color: #888; font-size: 16px; user-select: none; }
-        .drag-handle:active { cursor: grabbing; color: #00d2ff; }
-        .gradient-stop input[type="color"] { border: none; width: 40px; height: 30px; background: none; cursor: pointer; pading: 0; }
+        .gradient-stop input[type="color"] { border: none; width: 40px; height: 30px; background: none; cursor: pointer; padding: 0; }
         .gradient-stop input[type="number"] { width: 60px; padding: 4px; }
         
-        /* コントロール用スタイリング */
-        .anchor-point { fill: #00d2ff; stroke: #fff; stroke-width: 2; cursor: move; pointer-events: all; }
+        /* 操作用ヒットボックス (透明だけどタッチを広く吸い取る) */
+        .touch-hitbox { fill: transparent; stroke: transparent; stroke-width: 0; cursor: move; pointer-events: all; }
+        .anchor-point { fill: #00d2ff; stroke: #fff; stroke-width: 2; pointer-events: none; }
         .anchor-point.selected { fill: #ff4081; stroke: #fff; stroke-width: 3; }
-        .handle-point { fill: #fff; stroke: #00d2ff; stroke-width: 2; cursor: move; pointer-events: all; }
+        .handle-point { fill: #fff; stroke: #00d2ff; stroke-width: 2; pointer-events: none; }
         .handle-line { stroke: #00d2ff; stroke-width: 1.5; stroke-dasharray: 3; pointer-events: none; }
         #pen-guide-line { stroke: #ff4081; stroke-width: 2; stroke-dasharray: 4; pointer-events: none; }
         #eraser-brush-guide { fill: rgba(255,0,0,0.2); stroke: red; stroke-width: 1; pointer-events: none; }
@@ -39,17 +39,18 @@
 <body>
 
 <div id="sidebar">
-    <h2>SVG Editor Pro</h2>
+    <h2>SVG Editor Ultimate</h2>
     
     <div class="tool-group">
         <h3>1. ツール選択</h3>
         <div class="btn-grid">
-            <button id="tool-select" class="active" onclick="setTool('select')">選択・変形</button>
+            <button id="tool-select" class="active" onclick="setTool('select')">選択・移動・変形</button>
             <button id="tool-pen" onclick="setTool('pen')">ペン (タップ連打)</button>
+            <button id="tool-bucket" onclick="setTool('bucket')">🪣 バケツ塗りつぶし</button>
+            <button id="tool-eraser" onclick="setTool('eraser')">消しゴム (丸ごと削る)</button>
             <button id="tool-rect" onclick="setTool('rect')">四角形</button>
             <button id="tool-circle" onclick="setTool('circle')">円・楕円</button>
             <button id="tool-polygon" onclick="setTool('polygon')">正X角形</button>
-            <button id="tool-eraser" onclick="setTool('eraser')">消しゴム (削る)</button>
         </div>
     </div>
 
@@ -66,7 +67,7 @@
     </div>
 
     <div class="tool-group">
-        <h3>2. 線設定 (消しゴムの太さ共通)</h3>
+        <h3>2. 線設定 (消しゴム共通)</h3>
         <label>線の色</label>
         <input type="color" id="stroke-color" value="#000000" onchange="updateSelectedElementStyle()">
         <label>線の太さ / 消しゴムサイズ</label>
@@ -147,6 +148,7 @@
     
     const pathDataMap = new Map();
     let currentPenPoints = [];
+    let currentMaskPath = null;
 
     function createBgGrid() {
         const bg = document.getElementById('bg-grid');
@@ -259,7 +261,6 @@
         defs.appendChild(grad);
     }
 
-    // --- グラデーションの上下ドラッグ＆ドロップ並び替えシステム ---
     let dragSourceEl = null;
     function initDragAndDrop() {
         const stops = document.querySelectorAll('.gradient-stop');
@@ -269,27 +270,18 @@
                 this.classList.add('dragging');
                 e.dataTransfer.effectAllowed = 'move';
             });
-            stop.addEventListener('dragover', function(e) {
-                if (e.preventDefault) e.preventDefault();
-                return false;
-            });
+            stop.addEventListener('dragover', function(e) { if (e.preventDefault) e.preventDefault(); return false; });
             stop.addEventListener('dragenter', function() {
                 if (this !== dragSourceEl) {
                     const parent = this.parentNode;
                     const children = Array.from(parent.children);
                     if (children.indexOf(this) > children.indexOf(dragSourceEl)) {
                         parent.insertBefore(dragSourceEl, this.nextSibling);
-                    } else {
-                        parent.insertBefore(dragSourceEl, this);
-                    }
+                    } else { parent.insertBefore(dragSourceEl, this); }
                 }
             });
-            stop.addEventListener('dragend', function() {
-                this.classList.remove('dragging');
-                onGradientUIChange();
-            });
+            stop.addEventListener('dragend', function() { this.classList.remove('dragging'); onGradientUIChange(); });
             
-            // タブレット用タッチ並び替えエミュレート
             const handle = stop.querySelector('.drag-handle');
             handle.addEventListener('touchmove', function(e) {
                 e.preventDefault();
@@ -301,9 +293,7 @@
                     const children = Array.from(parent.children);
                     if (children.indexOf(closestStop) > children.indexOf(stop)) {
                         parent.insertBefore(stop, closestStop.nextSibling);
-                    } else {
-                        parent.insertBefore(stop, closestStop);
-                    }
+                    } else { parent.insertBefore(stop, closestStop); }
                     onGradientUIChange();
                 }
             }, {passive: false});
@@ -334,18 +324,28 @@
         }
     }
 
-    // --- メイン描画・消しゴム統合イベント ---
-    let currentMaskPath = null; // 部分消しゴム用のdデータ蓄積
-
+    // --- メイン描画システム ---
     function onStart(e) {
         const pos = getEventXY(e);
         startX = pos.x;
         startY = pos.y;
 
+        // 【新機能】🪣 バケツ塗りつぶしツール
+        if (currentTool === 'bucket') {
+            if (e.target !== svg && e.target.parentNode === drawLayer) {
+                selectedElement = e.target;
+                applyStyles(selectedElement);
+            }
+            return;
+        }
+
         if (currentTool === 'select') {
             if (e.target !== svg && e.target.parentNode === drawLayer) {
                 selectedElement = e.target;
                 setupTransformUI(selectedElement);
+                
+                // 図形全体の移動処理を開始
+                isDrawing = true; 
             } else if (e.target === svg) {
                 selectedElement = null;
                 selectedPointIdx = null;
@@ -360,8 +360,6 @@
             eraserGuide.setAttribute('cx', startX);
             eraserGuide.setAttribute('cy', startY);
             eraserGuide.setAttribute('display', 'inline');
-            
-            // 部分削り取り用に新しくマスク/パス用のくり抜きレイヤーの初期化
             currentMaskPath = `M ${startX} ${startY}`;
             eraseAtPoint(startX, startY);
             return;
@@ -405,6 +403,26 @@
         }
 
         if (!isDrawing) return;
+
+        // 【改善】選択ツールでの図形丸ごと移動
+        if (currentTool === 'select' && selectedElement) {
+            const dx = mouseX - startX;
+            const dy = mouseY - startY;
+            startX = mouseX;
+            startY = mouseY;
+            
+            const points = pathDataMap.get(selectedElement);
+            if (points) {
+                points.forEach(pt => {
+                    pt.x += dx; pt.y += dy;
+                    if(pt.h1x !== undefined) { pt.h1x += dx; pt.h1y += dy; }
+                    if(pt.h2x !== undefined) { pt.h2x += dx; pt.h2y += dy; }
+                });
+                renderPathFromData(selectedElement);
+                setupTransformUI(selectedElement);
+            }
+            return;
+        }
 
         if (currentTool === 'eraser') {
             eraserGuide.setAttribute('cx', mouseX);
@@ -465,37 +483,42 @@
         }
     }
 
-    // --- 高度な部分消しゴム (ベクター切り抜きマスク生成) ---
+    // --- 【修正】線(ストローク)も丸ごと削る超強力消しゴム ---
     function eraseAtPoint(x, y) {
-        // タッチ位置の下にある描画要素を探す
         const hitEls = document.elementsFromPoint(window.scrollX + svg.getBoundingClientRect().left + x, window.scrollY + svg.getBoundingClientRect().top + y);
         const target = hitEls.find(el => el.parentNode === drawLayer);
         
         if (target) {
             const brushSize = document.getElementById('stroke-width').value || 6;
+            let gGroup = target.parentNode;
             
-            // SVGマスクを使った高度な部分削り取り
-            let maskId = target.getAttribute('mask');
-            let maskEl;
-            if (!maskId) {
-                // 初めて削られる場合はマスクを新設
-                maskId = 'mask-' + Math.random().toString(36).substr(2, 9);
-                target.setAttribute('mask', `url(#${maskId})`);
+            // すでにグループ化(マスク適用済)されているか確認
+            if (gGroup.tagName.toLowerCase() !== 'g' || gGroup === drawLayer) {
+                // 初めて削る場合は、対象要素を専用の＜g＞タグで包み、そこにマスクをかける（これで線も一緒に消える！）
+                const maskId = 'mask-' + Math.random().toString(36).substr(2, 9);
                 
-                maskEl = document.createElementNS('http://www.w3.org/2000/svg', 'mask');
+                const newG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                newG.setAttribute('mask', `url(#${maskId})`);
+                
+                drawLayer.insertBefore(newG, target);
+                newG.appendChild(target);
+                gGroup = newG;
+                
+                const maskEl = document.createElementNS('http://www.w3.org/2000/svg', 'mask');
                 maskEl.setAttribute('id', maskId);
                 
-                // 全面を白（残す）にするベースマスク
                 const base = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
                 base.setAttribute('width', '100%'); base.setAttribute('height', '100%'); base.setAttribute('fill', 'white');
                 maskEl.appendChild(base);
                 defs.appendChild(maskEl);
-            } else {
-                maskId = maskId.replace('url(#', '').replace(')', '');
-                maskEl = document.getElementById(maskId);
+                
+                // pathDataMapのキーをグループ経由で追えるように要素自体は保持
+                selectedElement = target;
             }
             
-            // 黒い線（削り取る部分）をマスクの中に追加
+            const mId = gGroup.getAttribute('mask').replace('url(#', '').replace(')', '');
+            const maskContainer = document.getElementById(mId);
+            
             const cutPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             cutPath.setAttribute('d', currentMaskPath);
             cutPath.setAttribute('stroke', 'black');
@@ -503,7 +526,7 @@
             cutPath.setAttribute('fill', 'none');
             cutPath.setAttribute('stroke-linecap', 'round');
             cutPath.setAttribute('stroke-linejoin', 'round');
-            maskEl.appendChild(cutPath);
+            maskContainer.appendChild(cutPath);
         }
     }
 
@@ -534,37 +557,26 @@
         const points = pathDataMap.get(el);
         if (!points || points.length === 0) return;
         let d = `M ${points[0].x} ${points[0].y}`;
-        
         for (let i = 1; i < points.length; i++) {
-            const prev = points[i - 1];
-            const curr = points[i];
-            
+            const prev = points[i - 1]; const curr = points[i];
             if (curr.isClose) {
                 if (prev.type === 'smooth' || points[0].type === 'smooth') {
-                    const p2x = prev.h2x !== undefined ? prev.h2x : prev.x;
-                    const p2y = prev.h2y !== undefined ? prev.h2y : prev.y;
-                    const c1x = points[0].h1x !== undefined ? points[0].h1x : points[0].x;
-                    const c1y = points[0].h1y !== undefined ? points[0].h1y : points[0].y;
+                    const p2x = prev.h2x !== undefined ? prev.h2x : prev.x; const p2y = prev.h2y !== undefined ? prev.h2y : prev.y;
+                    const c1x = points[0].h1x !== undefined ? points[0].h1x : points[0].x; const c1y = points[0].h1y !== undefined ? points[0].h1y : points[0].y;
                     d += ` C ${p2x},${p2y} ${c1x},${c1y} ${points[0].x},${points[0].y} Z`;
-                } else {
-                    d += ` L ${points[0].x} ${points[0].y} Z`;
-                }
+                } else { d += ` L ${points[0].x} ${points[0].y} Z`; }
             } else {
                 if (prev.type === 'smooth' || curr.type === 'smooth') {
-                    const p2x = prev.h2x !== undefined ? prev.h2x : prev.x;
-                    const p2y = prev.h2y !== undefined ? prev.h2y : prev.y;
-                    const c1x = curr.h1x !== undefined ? curr.h1x : curr.x;
-                    const c1y = curr.h1y !== undefined ? curr.h1y : curr.y;
+                    const p2x = prev.h2x !== undefined ? prev.h2x : prev.x; const p2y = prev.h2y !== undefined ? prev.h2y : prev.y;
+                    const c1x = curr.h1x !== undefined ? curr.h1x : curr.x; const c1y = curr.h1y !== undefined ? curr.h1y : curr.y;
                     d += ` C ${p2x},${p2y} ${c1x},${c1y} ${curr.x} ${curr.y}`;
-                } else {
-                    d += ` L ${curr.x} ${curr.y}`;
-                }
+                } else { d += ` L ${curr.x} ${curr.y}`; }
             }
         }
         el.setAttribute('d', d);
     }
 
-    // --- 変形・ハンドルUI ---
+    // --- 【大改善】目に見えない巨大ヒットボックスによる超快適変形システム ---
     function setupTransformUI(el) {
         controlLayer.innerHTML = '';
         const points = pathDataMap.get(el);
@@ -580,9 +592,14 @@
                 createHandle(el, points, pt, 'h2');
             }
 
+            // 1. 最初に見えない超巨大なタッチ判定用の丸を作る (半径 28 px)
+            const hb = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            hb.setAttribute('cx', pt.x); hb.setAttribute('cy', pt.y); hb.setAttribute('r', 28);
+            hb.setAttribute('class', 'touch-hitbox');
+
+            // 2. 見た目用の綺麗な丸を作る
             const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y);
-            c.setAttribute('r', 12); // さらにタップしやすく拡大(半径12)
+            c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y); c.setAttribute('r', 10);
             c.className.baseVal = 'anchor-point' + (selectedPointIdx === idx ? ' selected' : '');
 
             function dragStart(e) {
@@ -603,26 +620,24 @@
                     setupTransformUI(el);
                 }
                 function dragEnd() {
-                    window.removeEventListener('mousemove', dragMove);
-                    window.removeEventListener('mouseup', dragEnd);
-                    window.removeEventListener('touchmove', dragMove);
-                    window.removeEventListener('touchend', dragEnd);
+                    window.removeEventListener('mousemove', dragMove); window.removeEventListener('mouseup', dragEnd);
+                    window.removeEventListener('touchmove', dragMove); window.removeEventListener('touchend', dragEnd);
                 }
-                window.addEventListener('mousemove', dragMove);
-                window.addEventListener('mouseup', dragEnd);
-                window.addEventListener('touchmove', dragMove, { passive: false });
-                window.addEventListener('touchend', dragEnd);
+                window.addEventListener('mousemove', dragMove); window.addEventListener('mouseup', dragEnd);
+                window.addEventListener('touchmove', dragMove, { passive: false }); window.addEventListener('touchend', dragEnd);
             }
-            c.addEventListener('mousedown', dragStart);
-            c.addEventListener('touchstart', dragStart, { passive: false });
+            // 巨大ヒットボックスの方にタッチイベントを仕込む！
+            hb.addEventListener('mousedown', dragStart);
+            hb.addEventListener('touchstart', dragStart, { passive: false });
+            
             controlLayer.appendChild(c);
+            controlLayer.appendChild(hb); // 重ね順はヒットボックスが上
         });
     }
 
     function createHandle(el, points, pt, key) {
         if (pt[key + 'x'] === undefined) {
-            pt[key + 'x'] = pt.x + (key === 'h1' ? -35 : 30);
-            pt[key + 'y'] = pt.y;
+            pt[key + 'x'] = pt.x + (key === 'h1' ? -35 : 35); pt[key + 'y'] = pt.y;
         }
         const hl = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         hl.setAttribute('x1', pt.x); hl.setAttribute('y1', pt.y);
@@ -630,9 +645,13 @@
         hl.className.baseVal = 'handle-line';
         controlLayer.appendChild(hl);
 
+        // ハンドル用にも見えない巨大ヒットボックスを作成
+        const hbh = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        hbh.setAttribute('cx', pt[key + 'x']); hbh.setAttribute('cy', pt[key + 'y']); hbh.setAttribute('r', 24);
+        hbh.setAttribute('class', 'touch-hitbox');
+
         const hc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        hc.setAttribute('cx', pt[key + 'x']); hc.setAttribute('cy', pt[key + 'y']);
-        hc.setAttribute('r', 9); 
+        hc.setAttribute('cx', pt[key + 'x']); hc.setAttribute('cy', pt[key + 'y']); hc.setAttribute('r', 8);
         hc.className.baseVal = 'handle-point';
 
         function handleDragStart(e) {
@@ -642,25 +661,22 @@
                 pt[key + 'x'] = p.x; pt[key + 'y'] = p.y;
                 const other = key === 'h1' ? 'h2' : 'h1';
                 if(pt[other + 'x'] !== undefined) {
-                    pt[other + 'x'] = pt.x + (pt.x - p.x);
-                    pt[other + 'y'] = pt.y + (pt.y - p.y);
+                    pt[other + 'x'] = pt.x + (pt.x - p.x); pt[other + 'y'] = pt.y + (pt.y - p.y);
                 }
                 renderPathFromData(el); setupTransformUI(el);
             }
             function handleDragEnd() {
-                window.removeEventListener('mousemove', handleDragMove);
-                window.removeEventListener('mouseup', handleDragEnd);
-                window.removeEventListener('touchmove', handleDragMove);
-                window.removeEventListener('touchend', handleDragEnd);
+                window.removeEventListener('mousemove', handleDragMove); window.removeEventListener('mouseup', handleDragEnd);
+                window.removeEventListener('touchmove', handleDragMove); window.removeEventListener('touchend', handleDragEnd);
             }
-            window.addEventListener('mousemove', handleDragMove);
-            window.addEventListener('mouseup', handleDragEnd);
-            window.addEventListener('touchmove', handleDragMove, { passive: false });
-            window.addEventListener('touchend', handleDragEnd);
+            window.addEventListener('mousemove', handleDragMove); window.addEventListener('mouseup', handleDragEnd);
+            window.addEventListener('touchmove', handleDragMove, { passive: false }); window.addEventListener('touchend', handleDragEnd);
         }
-        hc.addEventListener('mousedown', handleDragStart);
-        hc.addEventListener('touchstart', handleDragStart, { passive: false });
+        hbh.addEventListener('mousedown', handleDragStart);
+        hbh.addEventListener('touchstart', handleDragStart, { passive: false });
+        
         controlLayer.appendChild(hc);
+        controlLayer.appendChild(hbh);
     }
 
     function setSelectedNodeMode(mode) {
@@ -669,13 +685,10 @@
             if (points && points[selectedPointIdx]) {
                 points[selectedPointIdx].type = mode;
                 if (mode === 'smooth') {
-                    points[selectedPointIdx].h1x = points[selectedPointIdx].x - 35;
-                    points[selectedPointIdx].h1y = points[selectedPointIdx].y;
-                    points[selectedPointIdx].h2x = points[selectedPointIdx].x + 35;
-                    points[selectedPointIdx].h2y = points[selectedPointIdx].y;
+                    points[selectedPointIdx].h1x = points[selectedPointIdx].x - 35; points[selectedPointIdx].h1y = points[selectedPointIdx].y;
+                    points[selectedPointIdx].h2x = points[selectedPointIdx].x + 35; points[selectedPointIdx].h2y = points[selectedPointIdx].y;
                 }
-                renderPathFromData(selectedElement);
-                setupTransformUI(selectedElement);
+                renderPathFromData(selectedElement); setupTransformUI(selectedElement);
             }
         }
     }
@@ -684,13 +697,10 @@
         if (selectedElement && selectedPointIdx !== null) {
             const points = pathDataMap.get(selectedElement);
             if(points && points.length > selectedPointIdx + 1) {
-                const curr = points[selectedPointIdx];
-                const next = points[selectedPointIdx + 1];
-                const nx = (curr.x + next.x) / 2;
-                const ny = (curr.y + next.y) / 2;
+                const curr = points[selectedPointIdx]; const next = points[selectedPointIdx + 1];
+                const nx = (curr.x + next.x) / 2; const ny = (curr.y + next.y) / 2;
                 points.splice(selectedPointIdx + 1, 0, { x: nx, y: ny, h1x: nx - 35, h1y: ny, h2x: nx + 35, h2y: ny, type: 'sharp' });
-                renderPathFromData(selectedElement);
-                setupTransformUI(selectedElement);
+                renderPathFromData(selectedElement); setupTransformUI(selectedElement);
             }
         }
     }
